@@ -68,3 +68,30 @@ costs:
 run:
   mode: "research"
   stressed: true
+
+modeling:
+  sequence_window: 128
+  survival_bins: 32
+  survival_bin_mode: "bars"
+  use_movement_head: true
+  encoder: "mamba"
+  hidden_size: 256
+  num_layers: 4
+  dropout: 0.1
+  signature_features:
+    enabled: false
+    depth: 3
+    window: 64
+conformal:
+  enabled: true
+  method: "adaptive_ts"
+  window: 512
+  target_coverage: 0.85
+  utility_band_quantile: 0.85
+execution_survival:
+  utility_threshold: 0.0
+  max_gross_leverage: 1.0
+  per_asset_gate_tune: true
+cv:
+  outer_folds: 5
+  inner_folds: 3

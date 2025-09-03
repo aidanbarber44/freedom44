@@ -12,3 +12,10 @@ def pbo_from_matrix(perf_matrix):
     is_winner = perf_matrix.argmax(axis=1)
     below = (oos_ranks[np.arange(len(is_winner)), is_winner] < (perf_matrix.shape[1]/2)).mean()
     return 1.0 - below
+
+def guard_or_fail(sharpes_oos: np.ndarray, perf_matrix: np.ndarray, dsr_min: float = 0.10, pbo_max: float = 0.40) -> dict:
+    n = int(np.sum(~np.isnan(sharpes_oos)))
+    dsr = deflated_sharpe(np.nanmean(sharpes_oos), max(1, n))
+    pbo = pbo_from_matrix(perf_matrix)
+    ok = (dsr >= dsr_min) and (pbo <= pbo_max)
+    return {"deflated_sharpe": float(dsr), "pbo": float(pbo), "ok": bool(ok)}

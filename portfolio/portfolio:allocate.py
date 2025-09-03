@@ -26,3 +26,11 @@ def hrp_weights(returns: pd.DataFrame):
         w[c1]*=alpha; w[c2]*=(1-alpha)
         stack.extend([c1,c2])
     return (w/w.sum()).sort_index()
+
+def leverage_down(weights: pd.Series, risk_off_factor: float) -> pd.Series:
+    factor = float(max(0.0, min(1.0, risk_off_factor)))
+    w = weights * factor
+    s = float(w.sum())
+    if s > 1e-12:
+        w = w / s
+    return w
