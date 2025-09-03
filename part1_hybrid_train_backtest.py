@@ -12,7 +12,7 @@ What it does quickly on existing data:
 Outputs:
 - Prints feature shapes, class distribution, F1/Acc
 - Sweeps confidence/margin thresholds; reports best PnL, Sharpe, WinRate, Max Drawdown
-- Saves scaler and model to workspace for reuse
+- Saves scaler and model to workspace for reuse, hello world!
 
 Notes:
 - Designed to run in Colab quickly using existing /content/hybrid_workspace artifacts from Part 0
