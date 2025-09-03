@@ -1,0 +1,70 @@
+data:
+  symbols: [ADAUSD, AVAXUSD, LINKUSD, LTCUSD, SOLUSD, XRPUSD]
+  interval: "1h"
+  lookback_bars: 240
+  horizon_bars: 12
+  train_start: null
+  train_end: null
+  val_start: null
+  val_end: null
+
+features:
+  microstructure: true
+  volatility_har: true
+  regime: true
+  funding_basis: true
+  dino_embeddings: true
+  ict_counts: true
+
+models:
+  use_mlp: true
+  use_lgbm: true
+  use_stacker: true
+  use_meta_label: true
+  moe_enabled: true
+
+training:
+  folds: 5
+  embargo_bars: 10
+  class_weight: "balanced"
+  focal_gamma_stageA: 1.5
+  label_smoothing_stageB: 0.05
+  sample_weight_moves: true
+
+execution:
+  gates:
+    m_conf: 0.70
+    diff: 0.03
+    min_trades_research: 30
+  tp_sl:
+    atr_mult_tp: 2.5
+    atr_mult_sl: 0.75
+  trailing_mult: 1.2
+  time_stop_bars: 12
+  trend_align: true
+  adx_min_trend: 20
+  squeeze_diff_add: 0.01
+  kelly_scale: 0.35
+  size_cap: 0.05
+
+selection:
+  min_trades: 18
+  max_drawdown: null
+  sharpe_min: 0.40
+  wf_stability_sharpe: 0.30
+  pbo_max: 0.20
+  dsr_min: 0.10
+  gate_micro_grid: true
+
+portfolio:
+  method: "hrp"
+  rebalance: "weekly"
+  turnover_cap: 0.6
+
+costs:
+  fees: { ADAUSD: 0.0012, AVAXUSD: 0.0010 }
+  spreads: { ADAUSD: 0.0002, AVAXUSD: 0.0002 }
+
+run:
+  mode: "research"
+  stressed: true
