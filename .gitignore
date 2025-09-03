@@ -1,0 +1,27 @@
+# Python & notebooks
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+.env
+
+# Colab/local junk
+.DS_Store
+/content/
+
+# Big data & artifacts — keep these in Google Drive (hybrid_saves)
+datasets/
+hybrid_models/
+reports/
+cache/
+hybrid_saves/
+
+# Common large file types you don't want in git
+*.csv
+*.json
+*.pkl
+*.pt
+*.bin
+*.npz
+*.h5
+*.log
