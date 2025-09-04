@@ -50,18 +50,21 @@ try:
 except Exception:
     yaml = None  # type: ignore
 try:
-    from utils.seed import set_all_seeds  # type: ignore
+    from freedom44.utils.seed import set_all_seeds  # type: ignore
 except Exception:
-    def set_all_seeds(seed: int) -> None:
-        random.seed(seed)
-        np.random.seed(seed)
-        try:
-            import torch  # type: ignore
-            torch.manual_seed(seed)
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(seed)
-        except Exception:
-            pass
+    try:
+        from utils.seed import set_all_seeds  # type: ignore
+    except Exception:
+        def set_all_seeds(seed: int) -> None:
+            random.seed(seed)
+            np.random.seed(seed)
+            try:
+                import torch  # type: ignore
+                torch.manual_seed(seed)
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed_all(seed)
+            except Exception:
+                pass
 
 
 def load_config(path: str = "conf/experiment.yaml") -> dict:

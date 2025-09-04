@@ -26,50 +26,68 @@ try:
 except Exception:
     yaml = None  # type: ignore
 try:
-    from utils.seed import set_all_seeds  # type: ignore
+    from freedom44.utils.seed import set_all_seeds  # type: ignore
 except Exception:
-    def set_all_seeds(seed: int) -> None:
-        import random
-        try:
-            import torch  # type: ignore
-            torch.manual_seed(seed)
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(seed)
-        except Exception:
-            pass
-        random.seed(seed)
-        np.random.seed(seed)
+    try:
+        from utils.seed import set_all_seeds  # type: ignore
+    except Exception:
+        def set_all_seeds(seed: int) -> None:
+            import random
+            try:
+                import torch  # type: ignore
+                torch.manual_seed(seed)
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed_all(seed)
+            except Exception:
+                pass
+            random.seed(seed)
+            np.random.seed(seed)
 try:
-    from cv.purged import purged_time_splits  # type: ignore
+    from freedom44.cv.purged import purged_time_splits  # type: ignore
 except Exception:
-    purged_time_splits = None  # type: ignore
+    try:
+        from cv.purged import purged_time_splits  # type: ignore
+    except Exception:
+        purged_time_splits = None  # type: ignore
 try:
-    from features.microstructure import add_microstructure  # type: ignore
-    from features.volatility import add_har_rv  # type: ignore
-    from features.regime import add_regime  # type: ignore
-    from features.funding_basis import add_funding_basis  # type: ignore
+    from freedom44.features.microstructure import add_microstructure  # type: ignore
+    from freedom44.features.volatility import add_har_rv  # type: ignore
+    from freedom44.features.regime import add_regime  # type: ignore
+    from freedom44.features.funding_basis import add_funding_basis  # type: ignore
 except Exception:
-    def add_microstructure(df):
-        return pd.DataFrame(index=getattr(df, 'index', None))
-    def add_har_rv(rets):
-        return pd.DataFrame(index=getattr(rets, 'index', None))
-    def add_regime(close):
-        return pd.DataFrame(index=getattr(close, 'index', None))
-    def add_funding_basis(ohlcv, funding=None, basis=None):
-        return pd.DataFrame(index=getattr(ohlcv, 'index', None))
+    try:
+        from features.microstructure import add_microstructure  # type: ignore
+        from features.volatility import add_har_rv  # type: ignore
+        from features.regime import add_regime  # type: ignore
+        from features.funding_basis import add_funding_basis  # type: ignore
+    except Exception:
+        def add_microstructure(df):
+            return pd.DataFrame(index=getattr(df, 'index', None))
+        def add_har_rv(rets):
+            return pd.DataFrame(index=getattr(rets, 'index', None))
+        def add_regime(close):
+            return pd.DataFrame(index=getattr(close, 'index', None))
+        def add_funding_basis(ohlcv, funding=None, basis=None):
+            return pd.DataFrame(index=getattr(ohlcv, 'index', None))
 try:
-    from models.gbm import make_lgbm_movement, make_lgbm_direction  # type: ignore
+    from freedom44.models.gbm import make_lgbm_movement, make_lgbm_direction  # type: ignore
 except Exception:
-    def make_lgbm_movement():
-        from sklearn.linear_model import LogisticRegression
-        return LogisticRegression(max_iter=1000)
-    def make_lgbm_direction():
-        from sklearn.linear_model import LogisticRegression
-        return LogisticRegression(max_iter=1000)
+    try:
+        from models.gbm import make_lgbm_movement, make_lgbm_direction  # type: ignore
+    except Exception:
+        def make_lgbm_movement():
+            from sklearn.linear_model import LogisticRegression
+            return LogisticRegression(max_iter=1000)
+        def make_lgbm_direction():
+            from sklearn.linear_model import LogisticRegression
+            return LogisticRegression(max_iter=1000)
 try:
-    from models.stacking import ProbabilityStacker  # type: ignore
+    from freedom44.models.stacking import ProbabilityStacker  # type: ignore
 except Exception:
-    ProbabilityStacker = None  # type: ignore
+    try:
+        from models.stacking import ProbabilityStacker  # type: ignore
+    except Exception:
+        ProbabilityStacker = None  # type: ignore
 
 # === CONFIG LOADER (idempotent) ===
 def load_config(path: str = "conf/experiment.yaml"):
