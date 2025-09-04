@@ -171,7 +171,11 @@ def generate_event_crops(yolo_root: Path, out_root: Path, rng: random.Random, ta
                 for (c2, bx2, by2, ex2, ey2) in boxes:
                     r = _remap_label_to_crop(bx2, by2, ex2, ey2, (x1,y1,x2,y2), w, h)
                     if r is not None:
-                        remapped.append((c2, *r))
+                        xc, yc, ww, hh = r
+                        # require at least 2 px in both dimensions inside this crop
+                        if ww * (x2 - x1) >= 2 and hh * (y2 - y1) >= 2:
+                            remapped.append((c2, xc, yc, ww, hh))
+
                 if not remapped:
                     continue
 
@@ -194,6 +198,8 @@ def generate_event_crops(yolo_root: Path, out_root: Path, rng: random.Random, ta
                 })
 
     manifest = pd.DataFrame(rows)
+    # De-duplicate identical crops by content hash
+    manifest = manifest.drop_duplicates(subset=["sha256"]).reset_index(drop=True)
     if not manifest.empty:
         def _first_cls(path):
             with open(path) as f:
@@ -253,7 +259,7 @@ def _ffill_small_gaps(df: pd.DataFrame, max_gap: int = 2) -> Tuple[pd.DataFrame,
     na_groups = df_reidx['close'].isna().astype(int).groupby((~df_reidx['close'].isna()).cumsum()).sum()
     # ffill up to max_gap
     df_ff = df_reidx.copy()
-    df_ff[['open','high','low','close','volume']] = df_ff[['open','high','low','close','volume']].fillna(method='ffill', limit=max_gap)
+    df_ff[['open', 'high', 'low', 'close', 'volume']] = df_ff[['open', 'high', 'low', 'close', 'volume']].fillna(method='ffill', limit=max_gap)
     # mark remaining gaps
     rem = df_ff['close'].isna()
     if rem.any():
@@ -344,6 +350,8 @@ def build_all(symbols: List[str], start: str, end: str, outdir: str, seed: int =
     _safe_mkdir(img_dir); _safe_mkdir(lbl_dir)
 
     # ingest symbols
+    existing_label_files = list(lbl_dir.rglob("*.txt"))
+    has_real_labels = any((p.stat().st_size > 0) for p in existing_label_files) # noqa: F821
     start_ts = pd.Timestamp(start).tz_localize(None)
     end_ts = pd.Timestamp(end).tz_localize(None)
     manifest_rows_full = []
@@ -387,30 +395,31 @@ def build_all(symbols: List[str], start: str, end: str, outdir: str, seed: int =
         cut = int(0.8 * len(order))
         train_idx = set(order[:cut]); val_idx = set(order[cut:])
         # unit checks
-        assert len(train_idx.intersection(val_idx)) == 0
-        if times:
-            meta['ranges'][sym] = f"{min(times)} -> {max(times)}"
-        meta['counts'][sym] = { 'total': len(labels_b), 'bull': labels_b.count('bullish'), 'bear': labels_b.count('bearish'), 'neu': labels_b.count('neutral') }
-        # images/labels: we will write placeholder crops (full-frame as one crop) to keep pipeline consistent
-        for i, ((t0, t1, t2), lab) in enumerate(zip(wins_b, labels_b)):
-            fname = f"{sym}_{pd.Timestamp(t1).strftime('%Y%m%d%H%M%S')}_{i}.jpg"
-            img_path = img_dir / ('train' if i in train_idx else 'val') / fname
-            img_path.parent.mkdir(parents=True, exist_ok=True)
-            # save a tiny 1x1 image placeholder (actual chart generation happens in Part0 script if enabled)
-            try:
-                from PIL import Image
-                Image.new('RGB', (64, 64), color=(0, 0, 0)).save(str(img_path))
-            except Exception:
-                pass
-            lbl_path = lbl_dir / img_path.parent.name / (img_path.stem + '.txt')
-            lbl_path.parent.mkdir(parents=True, exist_ok=True)
-            # no boxes by default; detector training expects files; write empty label file
-            lbl_path.write_text("")
-            manifest_rows_full.append({
-                'image_path': str(img_path), 'symbol': sym, 'ts': str(t1), 'frame_size': '64x64',
-                'crop_meta': json.dumps({'type': 'full'}), 'label_counts': json.dumps({'bull':0,'bear':0,'neu':0}),
-                'sha256': _sha256_image_bytes(img_path), 'split': img_path.parent.name,
-            })
+        if not has_real_labels:
+            assert len(train_idx.intersection(val_idx)) == 0
+            if times:
+                meta['ranges'][sym] = f"{min(times)} -> {max(times)}"
+            meta['counts'][sym] = { 'total': len(labels_b), 'bull': labels_b.count('bullish'), 'bear': labels_b.count('bearish'), 'neu': labels_b.count('neutral') }
+            # images/labels: we will write placeholder crops (full-frame as one crop) to keep pipeline consistent
+            for i, ((t0, t1, t2), lab) in enumerate(zip(wins_b, labels_b)):
+                fname = f"{sym}_{pd.Timestamp(t1).strftime('%Y%m%d%H%M%S')}_{i}.jpg"
+                img_path = img_dir / ('train' if i in train_idx else 'val') / fname
+                img_path.parent.mkdir(parents=True, exist_ok=True)
+                # save a tiny 1x1 image placeholder (actual chart generation happens in Part0 script if enabled)
+                try:
+                    from PIL import Image
+                    Image.new('RGB', (64, 64), color=(0, 0, 0)).save(str(img_path))
+                except Exception:
+                    pass
+                lbl_path = lbl_dir / img_path.parent.name / (img_path.stem + '.txt')
+                lbl_path.parent.mkdir(parents=True, exist_ok=True)
+                # no boxes by default; detector training expects files; write empty label file
+                lbl_path.write_text("")
+                manifest_rows_full.append({
+                    'image_path': str(img_path), 'symbol': sym, 'ts': str(t1), 'frame_size': '64x64',
+                    'crop_meta': json.dumps({'type': 'full'}), 'label_counts': json.dumps({'bull':0,'bear':0,'neu':0}),
+                    'sha256': _sha256_image_bytes(img_path), 'split': img_path.parent.name,
+                })
         meta['symbols'][sym] = True
 
     # Baseline full-frame manifest
@@ -461,12 +470,16 @@ def build_all(symbols: List[str], start: str, end: str, outdir: str, seed: int =
         merged['view'] = merged['view'].fillna(merged['image_path'].map(md_crop['view']))
     # sha256
     merged['sha256'] = merged['image_path'].map(lambda p: _sha256_file(Path(p)) if Path(p).exists() else '')
+    # Remove duplicate images across full/crops by content hash
+    merged = merged.drop_duplicates(subset=['sha256']).reset_index(drop=True)
     # time split with embargo
     def make_time_splits(manifest: pd.DataFrame, embargo: int = 10) -> pd.DataFrame:
         m = manifest.copy()
         m['ts'] = pd.to_datetime(m['ts'], utc=True).dt.tz_convert(None)
         m = m.sort_values('ts').reset_index(drop=True)
         N = len(m)
+        m['ts'] = pd.to_datetime(m['ts'], utc=True)
+        m['ts_iso'] = m['ts'].dt.strftime('%Y-%m-%dT%H:%M:%SZ')
         train_end = int(N * 0.80)
         val_start = min(N-1, train_end + embargo)
         m.loc[:train_end, 'split'] = 'train'
