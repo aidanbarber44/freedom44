@@ -19,6 +19,7 @@ MOVE_MAP = {
     "models:stacking.py":         "models/stacking.py",
     "portfolio:allocate.py":      "portfolio/allocate.py",
     "risk:conformal.py":          "risk/conformal.py",
+    "risk:conformal_adaptive.py": "risk/conformal_adaptive.py",
     "selection:overfit_guard.py": "selection/overfit_guard.py",
     "utils:seed.py":              "utils/seed.py",
     "conf:experiment.yaml":       "conf/experiment.yaml",

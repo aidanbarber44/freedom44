@@ -132,7 +132,7 @@ def _unit_test_basic():
     assert (t["event_time_bin"] >= 1).all() and (t["event_time_bin"] <= 16).all()
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     _unit_test_basic()
 
 

@@ -18,31 +18,31 @@ except Exception:
 try:
     from labels.triple_barrier_survival import build_survival_targets  # type: ignore
 except Exception:
-    from freedom44.labels.labels.triple_barrier_survival import build_survival_targets  # type: ignore
+    from freedom44.labels.triple_barrier_survival import build_survival_targets  # type: ignore
 try:
     from features.sequence_builder import SequenceSurvivalDataset  # type: ignore
 except Exception:
-    from freedom44.features.features.sequence_builder import SequenceSurvivalDataset  # type: ignore
+    from freedom44.features.sequence_builder import SequenceSurvivalDataset  # type: ignore
 try:
     from models.mamba_survival import SurvivalMamba, deephit_loss  # type: ignore
 except Exception:
-    from freedom44.models.models.mamba_survival import SurvivalMamba, deephit_loss  # type: ignore
+    from freedom44.models.mamba_survival import SurvivalMamba, deephit_loss  # type: ignore
 try:
     from cv.purged import purged_time_splits  # type: ignore
 except Exception:
-    from freedom44.cv.cv.purged import purged_time_splits  # type: ignore
+    from freedom44.cv.purged import purged_time_splits  # type: ignore
 try:
     from risk.conformal_adaptive import AdaptiveTSConformal  # type: ignore
 except Exception:
-    from freedom44.risk.risk.conformal_adaptive import AdaptiveTSConformal  # type: ignore
+    from freedom44.risk.conformal_adaptive import AdaptiveTSConformal  # type: ignore
 try:
     from selection.overfit_guard import guard_or_fail  # type: ignore
 except Exception:
-    from freedom44.selection.selection.overfit_guard import guard_or_fail  # type: ignore
+    from freedom44.selection.overfit_guard import guard_or_fail  # type: ignore
 
 
 def load_config(path_default: str) -> Dict:
-    paths = [path_default, os.path.join(os.path.dirname(__file__), 'conf', 'experiment.yaml'), os.path.join(os.path.dirname(__file__), 'conf', 'conf:experiment.yaml')]
+    paths = [path_default, os.path.join(os.path.dirname(__file__), 'conf', 'experiment.yaml')]
     for p in paths:
         try:
             if os.path.exists(p) and yaml is not None:

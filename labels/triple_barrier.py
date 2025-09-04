@@ -4,8 +4,12 @@ def generate_events(close: pd.Series, ub_mult=2.5, lb_mult=0.75, t_max=12, atr=N
     events=[]
     for i in range(len(close)-t_max):
         p0=close.iloc[i]
-        ub=p0*(1+0.0) if atr is None else p0+ub_mult*(atr.iloc[i] or 0)
-        lb=p0*(1-0.0) if atr is None else p0-lb_mult*(atr.iloc[i] or 0)
+        if atr is None:
+            ub = p0 * (1 + ub_mult)
+            lb = p0 * (1 - lb_mult)
+        else:
+            ub = p0 + ub_mult * (atr.iloc[i] or 0)
+            lb = p0 - lb_mult * (atr.iloc[i] or 0)
         # resolve by walk-forward within t_max: hit ub -> +1, lb -> -1, none -> 0
         w=close.iloc[i+1:i+1+t_max]
         label=0

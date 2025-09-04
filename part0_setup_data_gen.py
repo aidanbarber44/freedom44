@@ -1248,12 +1248,16 @@ def build_windows_and_labels(asset: str, bar: pd.DataFrame, feat_bar: pd.DataFra
                     (DATASET_DIR / lab_mv).mkdir(parents=True, exist_ok=True)
                     Image.open(str(buf_path)).convert('RGB').save(str((DATASET_DIR / lab_mv / img_name)))
                     try: buf_path.unlink(missing_ok=True)  # type: ignore[arg-type]
-                    except Exception: pass
+                    except Exception:
+                        import logging
+                        logging.exception("Cleanup temp image failed in Part0")
                 except Exception:
-                    pass
+                    import logging
+                    logging.exception("Figure save or image processing failed in Part0 dino_images/ict_counts block")
             legacy_meta[img_name] = {'timestamp': pd.Timestamp(t).isoformat(), 'asset': asset, 'interval_min': 60 if CONF['data']['interval'] in ('1h','1H') else (240 if CONF['data']['interval'] in ('4h','4H') else 1440 if CONF['data']['interval'] in ('1d','1D') else 1), 'label': lab_mv, 'avg_change': ret_fut, 'window_file': window_fn, 'future_file': future_fn, 'yolo_pseudo_boxes': [], 'external_features': {}}
         except Exception:
-            pass
+            import logging
+            logging.exception("Window/future save or metadata population failed in Part0 loop")
     win_df = pd.DataFrame(rows)
     if not win_df.empty:
         win_df['t'] = pd.to_datetime(win_df['t']); win_df = win_df.sort_values('t')
