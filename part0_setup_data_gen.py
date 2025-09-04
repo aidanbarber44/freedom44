@@ -26,6 +26,7 @@ import shutil
 import random
 import zipfile
 import warnings
+import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
@@ -33,6 +34,13 @@ from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
+
+# Add logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 # ============================
 # Part0 v2: Config, seeds, workspace
@@ -62,6 +70,7 @@ def load_config(path: str = "conf/experiment.yaml") -> dict:
             with open(path, "r") as f:
                 return yaml.safe_load(f)
         except Exception:
+            logging.exception(f"Failed to load config from {path}, using defaults")
             pass
     return {
         "data": {
@@ -101,6 +110,8 @@ def ensure(pkg: str) -> None:
         __import__(pkg.split('==')[0].split('[')[0])
     except Exception:
         import subprocess
+        import logging
+        logging.exception(f"Failed to import {pkg}, attempting pip install")
         subprocess.check_call([sys.executable, '-m', 'pip', 'install', pkg])
 
 

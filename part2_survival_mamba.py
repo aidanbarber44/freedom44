@@ -1,4 +1,4 @@
-import os, math, numpy as np, pandas as pd, torch
+import os, math, numpy as np, pandas as pd, torch, logging
 from torch.utils.data import DataLoader
 from typing import Dict
 
@@ -40,6 +40,59 @@ try:
 except Exception:
     from freedom44.selection.overfit_guard import guard_or_fail  # type: ignore
 
+# Optional Colab nicety for T4 GPUs
+try:
+    if torch.cuda.is_available():
+        torch.set_float32_matmul_precision("high")
+except Exception:
+    logging.debug("Torch precision tweak not applied")
+
+DEFAULT_CONFIG = {
+    "data": {
+        "symbols": ["BTCUSD", "ETHUSD", "SOLUSD"],
+        "interval": "1h",
+        "lookback_bars": 240,
+        "horizon_bars": 12,
+        "train_start": "2019-01-01",
+        "train_end": "2023-12-31",
+        "val_start": "2024-01-01",
+        "val_end": "2024-06-30",
+    },
+    "model": {
+        "encoder": "gru",
+        "hidden_size": 128,
+        "num_layers": 2,
+        "dropout": 0.1,
+        "competing_risks": True,
+    },
+    "training": {
+        "batch_size": 256,
+        "epochs": 8,
+        "lr": 1e-3,
+        "weight_decay": 1e-4,
+        "purged_folds": 3,
+        "embargo_bars": 24,
+    },
+    "execution": {"tp_sl": {"atr_mult_tp": 2.5, "atr_mult_sl": 0.75}},
+    "conformal": {"enabled": True, "target_coverage": 0.85, "window": 2000},
+    "cv": {"outer_folds": 3, "inner_folds": 2},
+}
+
+def _normalize_config_keys(cfg: dict) -> dict:
+    # Accept both 'model' and 'modeling'
+    if "model" not in cfg and "modeling" in cfg:
+        cfg["model"] = cfg["modeling"]
+        logging.warning("Config uses 'modeling'; normalizing to 'model'")
+    if "modeling" not in cfg and "model" in cfg:
+        cfg["modeling"] = cfg["model"]
+    # Ensure 'execution'
+    cfg.setdefault("execution", {"tp_sl": {"atr_mult_tp": 2.5, "atr_mult_sl": 0.75}})
+    # Ensure 'conformal'
+    cfg.setdefault("conformal", {"enabled": True, "target_coverage": 0.85, "window": 2000})
+    # Ensure 'cv'
+    cfg.setdefault("cv", {"outer_folds": 3, "inner_folds": 2})
+    return cfg
+
 
 def load_config(path_default: str) -> Dict:
     paths = [path_default, os.path.join(os.path.dirname(__file__), 'conf', 'experiment.yaml')]
@@ -47,16 +100,16 @@ def load_config(path_default: str) -> Dict:
         try:
             if os.path.exists(p) and yaml is not None:
                 with open(p, 'r') as f:
-                    return yaml.safe_load(f)
+                    try:
+                        cfg = yaml.safe_load(f)
+                        return _normalize_config_keys(cfg)
+                    except Exception:
+                        logging.exception("Failed to parse config at %s; skipping", p)
+                        continue
         except Exception:
             continue
-    return {
-        'data': {'horizon_bars': 12},
-        'execution': {'tp_sl': {'atr_mult_tp': 2.5, 'atr_mult_sl': 0.75}},
-        'modeling': {'sequence_window': 128, 'survival_bins': 32, 'encoder': 'gru', 'hidden_size': 128, 'num_layers': 2, 'dropout': 0.1, 'signature_features': {'enabled': False, 'depth': 2, 'window': 64}},
-        'conformal': {'enabled': True, 'target_coverage': 0.85, 'window': 512},
-        'cv': {'outer_folds': 3, 'inner_folds': 2},
-    }
+    logging.warning("No valid YAML found; using DEFAULT_CONFIG")
+    return _normalize_config_keys(DEFAULT_CONFIG)
 
 
 def load_features_for_symbols(symbols, conf):

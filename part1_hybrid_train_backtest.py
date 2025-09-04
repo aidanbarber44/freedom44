@@ -27,9 +27,16 @@ import math
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Tuple
+import logging
 
 import numpy as np
 import pandas as pd
+
+# Add logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s"
+)
 
 # === NEW IMPORTS (idempotent) ===
 try:
@@ -92,7 +99,15 @@ def load_config(path: str = "conf/experiment.yaml"):
             with open(path, "r") as f:
                 return yaml.safe_load(f)
         except Exception:
-            pass
+            logging.error(f"Error loading config from {path}")
+            return {
+                "execution": {
+                    "tp_sl": {"atr_mult_tp": 2.5, "atr_mult_sl": 0.75},
+                    "kelly_scale": 0.35, "size_cap": 0.05,
+                },
+                "run": {"mode": "research", "stressed": True},
+            }
+    logging.warning(f"Config not found at {path}, using default.")
     return {
         "execution": {
             "tp_sl": {"atr_mult_tp": 2.5, "atr_mult_sl": 0.75},
@@ -145,8 +160,12 @@ VAL_FRACTION = 0.2
 def load_metadata() -> Dict[str, dict]:
     meta_path = DATASET_DIR / 'metadata.json'
     assert meta_path.exists(), f"metadata.json missing at {meta_path}"
-    with open(meta_path, 'r') as f:
-        return json.load(f)
+    try:
+        with open(meta_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        logging.error(f"Error loading metadata from {meta_path}: {e}")
+        return {}
 
 
 def list_samples(meta: Dict[str, dict]) -> List[Tuple[datetime, str, int, str, float, str, int]]:
@@ -168,6 +187,7 @@ def list_samples(meta: Dict[str, dict]) -> List[Tuple[datetime, str, int, str, f
         try:
             ts = datetime.fromisoformat(ts_iso)
         except Exception:
+            logging.warning(f"Skipping sample with invalid timestamp: {ts_iso}")
             continue
         samples.append((ts, str(img_path), label_map[lab], wfile, avg_change, asset, interval_min))
     samples.sort(key=lambda x: x[0])
@@ -188,12 +208,16 @@ def load_dino_emb(path: Path) -> np.ndarray:
         v = np.asarray(np.load(path, allow_pickle=True))  # fallback if saved differently
         if v.ndim == 1:
             return v.astype(np.float32)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning(f"Error loading DINO embedding from {path}: {e}")
     # Standard torch .pt
-    import torch
-    t = torch.load(str(path))
-    return (t if isinstance(t, np.ndarray) else t.cpu().numpy()).astype(np.float32)
+    try:
+        import torch
+        t = torch.load(str(path))
+        return (t if isinstance(t, np.ndarray) else t.cpu().numpy()).astype(np.float32)
+    except Exception as e:
+        logging.error(f"Error loading DINO embedding from {path}: {e}")
+    return np.zeros(768, dtype=np.float32) # Return a default zero array
 
 
 def build_dino_features(samples: List[Tuple[datetime, str, int, str, float, str, int]]) -> np.ndarray:
@@ -203,6 +227,7 @@ def build_dino_features(samples: List[Tuple[datetime, str, int, str, float, str,
         stem = Path(img_path).stem
         pt = EMBED_DIR / f"{stem}.pt"
         if not pt.exists():
+            logging.warning(f"DINO embedding not found for {img_path}, using zeros.")
             feats.append(np.zeros(768, dtype=np.float32))
             continue
         feats.append(load_dino_emb(pt))
@@ -227,6 +252,7 @@ def build_yolo_pseudo_features(samples: List[Tuple[datetime, str, int, str, floa
                     vec[cls_id] += 1.0
                     vec[len(names)+cls_id] += float(w) * float(h)
             except Exception:
+                logging.warning(f"Skipping invalid YOLO pseudo-box for {img_path}: {b}")
                 continue
         feats.append(vec)
     return np.vstack(feats).astype(np.float32)
@@ -242,6 +268,7 @@ def build_external_features(samples: List[Tuple[datetime, str, int, str, float, 
             key_set.add(k)
     keys = sorted(list(key_set))
     if not keys:
+        logging.warning("No external features found in metadata.")
         return np.zeros((len(samples), 0), dtype=np.float32)
     rows = []
     for s in samples:
@@ -286,10 +313,12 @@ def build_ts_features(samples: List[Tuple[datetime, str, int, str, float, str, i
     for s in samples:
         wfile = s[3]
         if not wfile:
+            logging.warning(f"No window file for sample: {s}")
             feats.append(np.zeros(7, dtype=np.float32))
             continue
         wp = DATASET_DIR / 'windows' / wfile
         if not wp.exists():
+            logging.warning(f"Window file not found: {wp}")
             feats.append(np.zeros(7, dtype=np.float32))
             continue
         try:
@@ -302,11 +331,15 @@ def build_ts_features(samples: List[Tuple[datetime, str, int, str, float, str, i
                 os.makedirs("cache", exist_ok=True)
                 _exp_path = os.path.join("cache", f"expanded_features_{asset}.parquet")
                 if os.path.exists(_exp_path):
+                    logging.info(f"Loading cached expanded features from {_exp_path}")
                     _ = pd.read_parquet(_exp_path)  # placeholder to trigger cache warmup
+                else:
+                    logging.info(f"Cache not found for asset {asset}, building features.")
             except Exception:
-                pass
+                logging.warning(f"Could not load or build expanded features for asset {s[5]}")
             feats.append(ts_summary(w))
-        except Exception:
+        except Exception as e:
+            logging.error(f"Error reading or processing window file {wp} for sample {s}: {e}")
             feats.append(np.zeros(7, dtype=np.float32))
     return np.vstack(feats).astype(np.float32)
 
@@ -323,55 +356,61 @@ def evaluate_calibrated_logreg(X_tr, y_tr, X_va, y_va) -> Tuple[object, Dict[str
     from sklearn.linear_model import LogisticRegression
     from sklearn.calibration import CalibratedClassifierCV
     from sklearn.metrics import f1_score, accuracy_score
-    model = CalibratedClassifierCV(LogisticRegression(class_weight='balanced', max_iter=2000), cv=3, method='sigmoid')
-    model.fit(X_tr, y_tr)
-    pred = model.predict(X_va)
-    from sklearn.metrics import confusion_matrix
-    f1 = f1_score(y_va, pred, average='macro')
-    acc = accuracy_score(y_va, pred)
-    print(f"Hybrid Calibrated LR | Acc={acc:.3f} F1={f1:.3f}")
-    return model, {'acc': acc, 'f1': f1}, pred
+    try:
+        model = CalibratedClassifierCV(LogisticRegression(class_weight='balanced', max_iter=2000), cv=3, method='sigmoid')
+        model.fit(X_tr, y_tr)
+        pred = model.predict(X_va)
+        f1 = f1_score(y_va, pred, average='macro')
+        acc = accuracy_score(y_va, pred)
+        logging.info(f"Hybrid Calibrated LR | Acc={acc:.3f} F1={f1:.3f}")
+        return model, {'acc': acc, 'f1': f1}, pred
+    except Exception as e:
+        logging.error(f"Error fitting or predicting with calibrated LR: {e}")
+        return None, {}, np.zeros(len(y_va))
 
 
 def backtest_gated(model, X_va: np.ndarray, y_va: np.ndarray, changes: np.ndarray) -> None:
     # y: 0=bear,1=bull,2=neutral; we trade long on 1, short on 0, hold on 2
     if not hasattr(model, 'predict_proba'):
-        print('Backtest skipped: model lacks predict_proba')
+        logging.warning('Backtest skipped: model lacks predict_proba')
         return
-    probs = model.predict_proba(X_va)
-    best = None
-    for conf_thr in [0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75]:
-        for diff_thr in [0.05, 0.10, 0.15, 0.20, 0.25, 0.30]:
-            pnl = []
-            for p, chg in zip(probs, changes):
-                pbear, pbull, pneu = p[0], p[1], p[2]
-                top = max(pbear, pbull, pneu)
-                # require top confidence and directional separation if not neutral
-                if top < conf_thr or (top != pneu and abs(pbull - pbear) < diff_thr):
-                    pnl.append(0.0); continue
-                if top == pbull and pbull > pbear:
-                    pnl.append(float(chg) - 0.001)
-                elif top == pbear and pbear > pbull:
-                    pnl.append(float(-chg) - 0.001)
-                else:
-                    pnl.append(0.0)
-            pnl = np.array(pnl, dtype=np.float32)
-            if len(pnl) == 0:
-                continue
-            eq = np.cumsum(pnl)
-            roll_max = np.maximum.accumulate(eq)
-            dd = roll_max - eq
-            max_dd = float(dd.max()) if len(dd) else 0.0
-            sharpe = float(pnl.mean() / (pnl.std() + 1e-8))
-            win_rate = float((pnl > 0).mean())
-            total = float(eq[-1]) if len(eq) else 0.0
-            stat = {'conf': conf_thr, 'diff': diff_thr, 'pnl': total, 'sharpe': sharpe, 'win_rate': win_rate, 'max_dd': max_dd}
-            if best is None or stat['pnl'] > best['pnl'] or (abs(stat['pnl'] - best['pnl']) < 1e-6 and sharpe > best['sharpe']):
-                best = stat
-    if best:
-        print(f"Backtest (val): PnL={best['pnl']:.4f} Sharpe={best['sharpe']:.2f} WinRate={best['win_rate']:.2%} MaxDD={best['max_dd']:.4f} at conf={best['conf']} diff={best['diff']}")
-    else:
-        print('Backtest produced no trades with the given thresholds.')
+    try:
+        probs = model.predict_proba(X_va)
+        best = None
+        for conf_thr in [0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75]:
+            for diff_thr in [0.05, 0.10, 0.15, 0.20, 0.25, 0.30]:
+                pnl = []
+                for p, chg in zip(probs, changes):
+                    pbear, pbull, pneu = p[0], p[1], p[2]
+                    top = max(pbear, pbull, pneu)
+                    # require top confidence and directional separation if not neutral
+                    if top < conf_thr or (top != pneu and abs(pbull - pbear) < diff_thr):
+                        pnl.append(0.0); continue
+                    if top == pbull and pbull > pbear:
+                        pnl.append(float(chg) - 0.001)
+                    elif top == pbear and pbear > pbull:
+                        pnl.append(float(-chg) - 0.001)
+                    else:
+                        pnl.append(0.0)
+                pnl = np.array(pnl, dtype=np.float32)
+                if len(pnl) == 0:
+                    continue
+                eq = np.cumsum(pnl)
+                roll_max = np.maximum.accumulate(eq)
+                dd = roll_max - eq
+                max_dd = float(dd.max()) if len(dd) else 0.0
+                sharpe = float(pnl.mean() / (pnl.std() + 1e-8))
+                win_rate = float((pnl > 0).mean())
+                total = float(eq[-1]) if len(eq) else 0.0
+                stat = {'conf': conf_thr, 'diff': diff_thr, 'pnl': total, 'sharpe': sharpe, 'win_rate': win_rate, 'max_dd': max_dd}
+                if best is None or stat['pnl'] > best['pnl'] or (abs(stat['pnl'] - best['pnl']) < 1e-6 and sharpe > best['sharpe']):
+                    best = stat
+        if best:
+            logging.info(f"Backtest (val): PnL={best['pnl']:.4f} Sharpe={best['sharpe']:.2f} WinRate={best['win_rate']:.2%} MaxDD={best['max_dd']:.4f} at conf={best['conf']} diff={best['diff']}")
+        else:
+            logging.warning('Backtest produced no trades with the given thresholds.')
+    except Exception as e:
+        logging.error(f"Error during backtest_gated: {e}")
 
 
 def build_context_features(samples: List[Tuple[datetime, str, int, str, float, str, int]]) -> np.ndarray:
@@ -397,7 +436,7 @@ def evaluate_binary_pipeline(X_tr, y_tr, X_va, y_va, changes) -> None:
     tr_mask = (y_tr != 2)
     va_mask = (y_va != 2)
     if tr_mask.sum() < 100 or va_mask.sum() < 100:
-        print('Binary pipeline skipped: insufficient bull/bear samples.')
+        logging.warning('Binary pipeline skipped: insufficient bull/bear samples.')
         return
     Xtr, ytr = X_tr[tr_mask], y_tr[tr_mask]
     Xva, yva = X_va[va_mask], y_va[va_mask]
@@ -405,53 +444,57 @@ def evaluate_binary_pipeline(X_tr, y_tr, X_va, y_va, changes) -> None:
     # remap to 0/1 with 0=bear,1=bull
     ytr_bin = (ytr == 1).astype(np.int64)
     yva_bin = (yva == 1).astype(np.int64)
-    model = CalibratedClassifierCV(LogisticRegression(class_weight='balanced', max_iter=2000), cv=3, method='sigmoid')
-    model.fit(Xtr, ytr_bin)
-    pred = model.predict(Xva)
-    f1 = f1_score(yva_bin, pred, average='macro')
-    acc = accuracy_score(yva_bin, pred)
-    print(f"Binary Calibrated LR | Acc={acc:.3f} F1={f1:.3f} (bull/bear only)")
-    # gated backtest for binary
-    probs = model.predict_proba(Xva)[:, 1]  # prob bull
-    best = None
-    for conf_thr in [0.50, 0.55, 0.60, 0.65, 0.70]:
-        for margin in [0.0, 0.05, 0.10, 0.15]:
-            pnl = []
-            for p, chg in zip(probs, cva):
-                if abs(p - 0.5) < margin or max(p, 1 - p) < conf_thr:
-                    pnl.append(0.0); continue
-                if p > 0.5:
-                    pnl.append(float(chg) - 0.001)
-                else:
-                    pnl.append(float(-chg) - 0.001)
-            pnl = np.array(pnl, dtype=np.float32)
-            if len(pnl) == 0:
-                continue
-            eq = np.cumsum(pnl)
-            roll_max = np.maximum.accumulate(eq)
-            dd = roll_max - eq
-            max_dd = float(dd.max()) if len(dd) else 0.0
-            sharpe = float(pnl.mean() / (pnl.std() + 1e-8))
-            win_rate = float((pnl > 0).mean())
-            total = float(eq[-1]) if len(eq) else 0.0
-            stat = {'conf': conf_thr, 'margin': margin, 'pnl': total, 'sharpe': sharpe, 'win_rate': win_rate, 'max_dd': max_dd}
-            if best is None or stat['pnl'] > best['pnl'] or (abs(stat['pnl'] - best['pnl']) < 1e-6 and sharpe > best['sharpe']):
-                best = stat
-    if best:
-        print(f"Binary Backtest (val): PnL={best['pnl']:.4f} Sharpe={best['sharpe']:.2f} WinRate={best['win_rate']:.2%} MaxDD={best['max_dd']:.4f} at conf={best['conf']} margin={best['margin']}")
-    else:
-        print('Binary backtest produced no trades with the given thresholds.')
+    try:
+        model = CalibratedClassifierCV(LogisticRegression(class_weight='balanced', max_iter=2000), cv=3, method='sigmoid')
+        model.fit(Xtr, ytr_bin)
+        pred = model.predict(Xva)
+        f1 = f1_score(yva_bin, pred, average='macro')
+        acc = accuracy_score(yva_bin, pred)
+        logging.info(f"Binary Calibrated LR | Acc={acc:.3f} F1={f1:.3f} (bull/bear only)")
+        # gated backtest for binary
+        probs = model.predict_proba(Xva)[:, 1]  # prob bull
+        best = None
+        for conf_thr in [0.50, 0.55, 0.60, 0.65, 0.70]:
+            for margin in [0.0, 0.05, 0.10, 0.15]:
+                pnl = []
+                for p, chg in zip(probs, cva):
+                    if abs(p - 0.5) < margin or max(p, 1 - p) < conf_thr:
+                        pnl.append(0.0); continue
+                    if p > 0.5:
+                        pnl.append(float(chg) - 0.001)
+                    else:
+                        pnl.append(float(-chg) - 0.001)
+                pnl = np.array(pnl, dtype=np.float32)
+                if len(pnl) == 0:
+                    continue
+                eq = np.cumsum(pnl)
+                roll_max = np.maximum.accumulate(eq)
+                dd = roll_max - eq
+                max_dd = float(dd.max()) if len(dd) else 0.0
+                sharpe = float(pnl.mean() / (pnl.std() + 1e-8))
+                win_rate = float((pnl > 0).mean())
+                total = float(eq[-1]) if len(eq) else 0.0
+                stat = {'conf': conf_thr, 'margin': margin, 'pnl': total, 'sharpe': sharpe, 'win_rate': win_rate, 'max_dd': max_dd}
+                if best is None or stat['pnl'] > best['pnl'] or (abs(stat['pnl'] - best['pnl']) < 1e-6 and sharpe > best['sharpe']):
+                    best = stat
+        if best:
+            logging.info(f"Binary Backtest (val): PnL={best['pnl']:.4f} Sharpe={best['sharpe']:.2f} WinRate={best['win_rate']:.2%} MaxDD={best['max_dd']:.4f} at conf={best['conf']} margin={best['margin']}")
+        else:
+            logging.warning('Binary backtest produced no trades with the given thresholds.')
+    except Exception as e:
+        logging.error(f"Error during binary pipeline evaluation: {e}")
 
 
 def main():
     meta = load_metadata()
     samples = list_samples(meta)
-    print(f"Total samples: {len(samples)}")
+    logging.info(f"Total samples: {len(samples)}")
     if len(samples) < 500:
-        print('Not enough samples for hybrid training.'); return
+        logging.warning('Not enough samples for hybrid training.')
+        return
 
     train_idx, val_idx = train_val_split(samples, VAL_FRACTION, EMBARGO_BARS)
-    print(f"Train/Val sizes: {len(train_idx)}/{len(val_idx)} (embargo={EMBARGO_BARS})")
+    logging.info(f"Train/Val sizes: {len(train_idx)}/{len(val_idx)} (embargo={EMBARGO_BARS})")
 
     # Build features
     X_dino = build_dino_features(samples)
@@ -463,7 +506,7 @@ def main():
     changes = np.array([s[4] for s in samples], dtype=np.float32)
 
     X_full = np.concatenate([X_dino, X_ts, X_yolo, X_ctx, X_ext], axis=1).astype(np.float32)
-    print(f"Feature blocks -> DINO:{X_dino.shape[1]}, TS:{X_ts.shape[1]}, YOLO:{X_yolo.shape[1]}, CTX:{X_ctx.shape[1]} | X:{X_full.shape}")
+    logging.info(f"Feature blocks -> DINO:{X_dino.shape[1]}, TS:{X_ts.shape[1]}, YOLO:{X_yolo.shape[1]}, CTX:{X_ctx.shape[1]} | X:{X_full.shape}")
 
     X_tr = X_full[train_idx]; y_tr = Y[train_idx]
     X_va = X_full[val_idx]; y_va = Y[val_idx]
@@ -484,14 +527,17 @@ def main():
     # Save artifacts
     out_dir = BASE_DIR / 'hybrid_models'
     out_dir.mkdir(parents=True, exist_ok=True)
-    import joblib
-    joblib.dump({'mu': scl['mu'], 'sd': scl['sd']}, out_dir / 'scaler.pkl')
-    joblib.dump(model, out_dir / 'calibrated_logreg.pkl')
-    print(f"Saved scaler and model to {out_dir}")
+    try:
+        import joblib
+        joblib.dump({'mu': scl['mu'], 'sd': scl['sd']}, out_dir / 'scaler.pkl')
+        joblib.dump(model, out_dir / 'calibrated_logreg.pkl')
+        logging.info(f"Saved scaler and model to {out_dir}")
+    except Exception as e:
+        logging.error(f"Error saving artifacts: {e}")
 
     # Minimal run summary
     try:
-        print("\n=== RUN SUMMARY ===")
+        logging.info("\n=== RUN SUMMARY ===")
         try:
             print(f"Sharpe (val): {metrics.get('sharpe_val'):.3f}")
         except Exception:
@@ -504,7 +550,7 @@ def main():
             print(f"Trades: {metrics.get('trades_total')}")
         except Exception:
             pass
-        print("Done.")
+        logging.info("Done.")
     except Exception:
         pass
 
