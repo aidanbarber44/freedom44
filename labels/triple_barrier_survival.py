@@ -77,7 +77,7 @@ def build_survival_targets(
         raise ValueError("Not enough rows for horizon_max")
 
     close = df["close"].astype(float)
-    atr = df["atr"].astype(float).fillna(method="ffill").fillna(0.0)
+    atr = df["atr"].astype(float).ffill().fillna(0.0)
 
     # Pre-compute scale for vol_scaled binning
     # Max cumulative units for timeout path

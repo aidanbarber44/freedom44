@@ -53,7 +53,8 @@ class SequenceSurvivalDataset(Dataset):
                 # append to last step features
                 last = x_seq[-1]
                 x_seq[-1] = torch.cat([last, sig_feats], dim=-1)
-        meta = {"start_idx": i, "end_idx": j, "ts": self.index[j - 1]}
+        ts_iso = self.index[j - 1].isoformat() if hasattr(self.index[j - 1], 'isoformat') else str(self.index[j - 1])
+        meta = {"start_idx": i, "end_idx": j, "ts": ts_iso}
         y = {
             "risk": int(self.tgt["event_risk"][j - 1]),
             "time_bin": int(self.tgt["event_time_bin"][j - 1]),

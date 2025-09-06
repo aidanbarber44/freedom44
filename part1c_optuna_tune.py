@@ -59,6 +59,7 @@ def resolve_p1b_path() -> Path:
         Path('/Users/aidanbarber/Documents/code/part1b_two_stage_hybrid.py'),
         BASE_DIR.parent / 'code' / 'part1b_two_stage_hybrid.py',
         Path.cwd() / 'part1b_two_stage_hybrid.py',
+        Path('/content/freedom44/part1b_two_stage_hybrid.py'),
     ]
     for p in candidates:
         if p.exists():

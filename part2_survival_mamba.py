@@ -160,8 +160,8 @@ def train_one_asset(df: pd.DataFrame, conf: Dict, device: str = "cpu") -> Dict:
             x_seq = x_seq.to(device)
             out = model(x_seq)
             tgt = {
-                "risk": torch.tensor([y_i["risk"] for y_i in [y] * len(x_seq)], device=device).long(),
-                "time_bin": torch.tensor([y_i["time_bin"] for y_i in [y] * len(x_seq)], device=device).long(),
+                "risk": y["risk"].to(device).long(),
+                "time_bin": y["time_bin"].to(device).long(),
             }
             loss = deephit_loss(out, tgt, use_movement_head=modeling.get("use_movement_head", True))
             opt.zero_grad(); loss.backward(); opt.step()
@@ -172,7 +172,7 @@ def main():
     import argparse
     p = argparse.ArgumentParser()
     p.add_argument("--conf", type=str, default=os.path.join(os.path.dirname(__file__), "conf", "experiment.yaml"))
-    p.add_argument("--assets", type=str, default="ADAUSD,AVAXUSD")
+    p.add_argument("--assets", type=str, default="XBTUSD,ETHUSD,SOLUSD,ADAUSD,LTCUSD,XRPUSD,AVAXUSD,LINKUSD,DOTUSD,ATOMUSD,SUIUSD,UNIUSD")
     p.add_argument("--save", type=str, default="hybrid_workspace/hybrid_models_survival")
     p.add_argument("--device", type=str, default="cpu")
     p.add_argument("--dry_run", action="store_true")

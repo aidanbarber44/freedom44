@@ -1,5 +1,5 @@
 data:
-  symbols: [ADAUSD, AVAXUSD, LINKUSD, LTCUSD, SOLUSD, XRPUSD]
+  symbols: [XBTUSD, ETHUSD, SOLUSD, ADAUSD, LTCUSD, XRPUSD, AVAXUSD, LINKUSD, DOTUSD, ATOMUSD, SUIUSD, UNIUSD]
   interval: "1h"
   lookback_bars: 240
   horizon_bars: 12
