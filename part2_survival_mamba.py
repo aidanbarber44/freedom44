@@ -39,6 +39,24 @@ try:
     from selection.overfit_guard import guard_or_fail  # type: ignore
 except Exception:
     from freedom44.selection.overfit_guard import guard_or_fail  # type: ignore
+# --- MODIFICATION: Import the real data loader ---
+try:
+    from freedom44.data_loader_real import load_features_for_symbols
+except ImportError:
+    print("WARNING: Could not import real data loader. Falling back to synthetic data.")
+    # This fallback ensures the script can still run if the new file isn't present
+    def load_features_for_symbols(symbols, conf):
+        idx = pd.date_range("2022-01-01", periods=10000, freq="H")
+        feats = {}
+        for s in symbols:
+            close = pd.Series(np.cumsum(np.random.randn(len(idx)) * 0.1) + 100.0, index=idx)
+            atr = close.rolling(14).std().fillna(close.std() * 0.1)
+            f = pd.DataFrame({"close": close, "atr": atr})
+            f["ret1"] = f["close"].pct_change().fillna(0.0)
+            f["vol14"] = f["ret1"].rolling(14).std().fillna(0.0)
+            feats[s] = f
+        return feats
+
 
 # Optional Colab nicety for T4 GPUs
 try:
@@ -111,23 +129,6 @@ def load_config(path_default: str) -> Dict:
     logging.warning("No valid YAML found; using DEFAULT_CONFIG")
     return _normalize_config_keys(DEFAULT_CONFIG)
 
-
-def load_features_for_symbols(symbols, conf):
-    # Placeholder: user should plug into their feature pipeline.
-    # For now, create synthetic features for dry-run compatibility.
-    idx = pd.date_range("2022-01-01", periods=10000, freq="H")
-    feats = {}
-    for s in symbols:
-        close = pd.Series(np.cumsum(np.random.randn(len(idx)) * 0.1) + 100.0, index=idx)
-        atr = close.rolling(14).std().fillna(close.std() * 0.1)
-        f = pd.DataFrame({"close": close, "atr": atr})
-        # toy engineered features
-        f["ret1"] = f["close"].pct_change().fillna(0.0)
-        f["vol14"] = f["ret1"].rolling(14).std().fillna(0.0)
-        feats[s] = f
-    return feats
-
-
 def train_one_asset(df: pd.DataFrame, conf: Dict, device: str = "cpu") -> Dict:
     modeling = conf.get("modeling", {})
     W = int(modeling.get("sequence_window", 128))
@@ -140,6 +141,12 @@ def train_one_asset(df: pd.DataFrame, conf: Dict, device: str = "cpu") -> Dict:
     targets = build_survival_targets(df, tp_mult=tp_mult, sl_mult=sl_mult, horizon_max=horizon, mode=mode, bins=K)
     features_df = df.drop(columns=["close"])  # full; dataset aligns indices
     ds = SequenceSurvivalDataset(features_df, targets, window=W, signature_cfg=modeling.get("signature_features", {}))
+    
+    # Handle case where dataset is too small to train
+    if len(ds) == 0:
+        logging.warning(f"Dataset for asset is empty after processing. Skipping training.")
+        return {"model": None, "dataset": None}
+        
     loader = DataLoader(ds, batch_size=128, shuffle=True, drop_last=True)
 
     input_dim = ds.num_features
@@ -154,7 +161,8 @@ def train_one_asset(df: pd.DataFrame, conf: Dict, device: str = "cpu") -> Dict:
     ).to(device)
 
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
-    for epoch in range(3):  # short training for example; real runs increase
+    # Increased epochs for meaningful training on real data
+    for epoch in range(conf.get("training", {}).get("epochs", 8)):
         model.train()
         for x_seq, meta, y in loader:
             x_seq = x_seq.to(device)
@@ -172,7 +180,7 @@ def main():
     import argparse
     p = argparse.ArgumentParser()
     p.add_argument("--conf", type=str, default=os.path.join(os.path.dirname(__file__), "conf", "experiment.yaml"))
-    p.add_argument("--assets", type=str, default="XBTUSD,ETHUSD,SOLUSD,ADAUSD,LTCUSD,XRPUSD,AVAXUSD,LINKUSD,DOTUSD,ATOMUSD,SUIUSD,UNIUSD")
+    p.add_argument("--assets", type=str, default="BTCUSD,ETHUSD,SOLUSD,ADAUSD,LTCUSD,XRPUSD,AVAXUSD,LINKUSD,DOTUSD,ATOMUSD,SUIUSD,UNIUSD")
     p.add_argument("--save", type=str, default="hybrid_workspace/hybrid_models_survival")
     p.add_argument("--device", type=str, default="cpu")
     p.add_argument("--dry_run", action="store_true")
@@ -183,17 +191,36 @@ def main():
     os.makedirs(args.save, exist_ok=True)
 
     symbols = [s.strip() for s in args.assets.split(",") if s.strip()]
+    
+    # --- MODIFICATION: This now calls the real data loader ---
+    print("Loading real data from Google Drive...")
     feats = load_features_for_symbols(symbols, conf)
 
-    # TODO: implement nested CV and conformal online evaluation; placeholder single asset loop
     results = {}
+    # --- NEW: Create a directory for saved models ---
+    models_save_dir = os.path.join(args.save, "trained_model_states")
+    os.makedirs(models_save_dir, exist_ok=True)
+
     for s in symbols:
+        if s not in feats or feats[s].empty:
+            print(f"No data for {s}, skipping training.")
+            continue
+        print(f"Training survival model for {s}...")
         out = train_one_asset(feats[s], conf, device=args.device)
-        results[s] = {"trained": True}
+        
+        # We only record success if a model was actually trained
+        if out.get("model"):
+            results[s] = {"trained": True}
+            # --- NEW: Save the trained model's state dictionary ---
+            model_save_path = os.path.join(models_save_dir, f"{s}_model.pth")
+            torch.save(out["model"].state_dict(), model_save_path)
+            print(f"Saved model for {s} to {model_save_path}")
+        else:
+            results[s] = {"trained": False}
+
 
     pd.DataFrame.from_dict(results, orient="index").to_csv(os.path.join(args.save, "results_summary.csv"))
 
 if __name__ == "__main__":
     main()
-
 
