@@ -1,3 +1,5 @@
+# In part2_survival_mamba.py
+
 import os, math, numpy as np, pandas as pd, torch, logging
 from torch.utils.data import DataLoader
 from typing import Dict
@@ -7,46 +9,50 @@ try:
 except Exception:
     yaml = None  # type: ignore
 
-# Robust local imports mirroring Part 1 style
+# --- CORRECTED IMPORTS ---
 try:
-    from utils.seed import set_all_seeds  # type: ignore
-except Exception:
-    def set_all_seeds(seed: int) -> None:
-        torch.manual_seed(seed)
-        np.random.seed(seed)
+    from .utils.seed import set_all_seeds
+except ImportError:
+    # Fallback for different environment setups
+    from utils.seed import set_all_seeds
 
 try:
-    from labels.triple_barrier_survival import build_survival_targets  # type: ignore
-except Exception:
-    from freedom44.labels.triple_barrier_survival import build_survival_targets  # type: ignore
+    from .labels.triple_barrier_survival import build_survival_targets
+except ImportError:
+    from labels.triple_barrier_survival import build_survival_targets
+
 try:
-    from features.sequence_builder import SequenceSurvivalDataset  # type: ignore
-except Exception:
-    from freedom44.features.sequence_builder import SequenceSurvivalDataset  # type: ignore
+    from .features.sequence_builder import SequenceSurvivalDataset
+except ImportError:
+    from features.sequence_builder import SequenceSurvivalDataset
+
 try:
-    from models.mamba_survival import SurvivalMamba, deephit_loss  # type: ignore
-except Exception:
-    from freedom44.models.mamba_survival import SurvivalMamba, deephit_loss  # type: ignore
+    from .models.mamba_survival import SurvivalMamba, deephit_loss
+except ImportError:
+    from models.mamba_survival import SurvivalMamba, deephit_loss
+
 try:
-    from cv.purged import purged_time_splits  # type: ignore
-except Exception:
-    from freedom44.cv.purged import purged_time_splits  # type: ignore
+    from .cv.purged import purged_time_splits
+except ImportError:
+    from cv.purged import purged_time_splits
+
 try:
-    from risk.conformal_adaptive import AdaptiveTSConformal  # type: ignore
-except Exception:
-    from freedom44.risk.conformal_adaptive import AdaptiveTSConformal  # type: ignore
+    from .risk.conformal_adaptive import AdaptiveTSConformal
+except ImportError:
+    from risk.conformal_adaptive import AdaptiveTSConformal
+
 try:
-    from selection.overfit_guard import guard_or_fail  # type: ignore
-except Exception:
-    from freedom44.selection.overfit_guard import guard_or_fail  # type: ignore
-# --- MODIFICATION: Import the real data loader ---
+    from .selection.overfit_guard import guard_or_fail
+except ImportError:
+    from selection.overfit_guard import guard_or_fail
+
 try:
-    from freedom44.data_loader_real import load_features_for_symbols
+    from .data_loader_real import load_features_for_symbols
 except ImportError:
     print("WARNING: Could not import real data loader. Falling back to synthetic data.")
-    # This fallback ensures the script can still run if the new file isn't present
     def load_features_for_symbols(symbols, conf):
-        idx = pd.date_range("2022-01-01", periods=10000, freq="H")
+        # ... (fallback function remains the same) ...
+        idx = pd.date_range("2022-01-01", periods=10000, freq="h")
         feats = {}
         for s in symbols:
             close = pd.Series(np.cumsum(np.random.randn(len(idx)) * 0.1) + 100.0, index=idx)
@@ -56,6 +62,7 @@ except ImportError:
             f["vol14"] = f["ret1"].rolling(14).std().fillna(0.0)
             feats[s] = f
         return feats
+# --- END OF CORRECTED IMPORTS ---
 
 
 # Optional Colab nicety for T4 GPUs
@@ -138,9 +145,18 @@ def train_one_asset(df: pd.DataFrame, conf: Dict, device: str = "cpu") -> Dict:
     sl_mult = float(conf.get("execution", {}).get("tp_sl", {}).get("atr_mult_sl", 0.75))
     horizon = int(conf.get("data", {}).get("horizon_bars", 12))
 
+    
+    # ... (code before this is fine) ...
     targets = build_survival_targets(df, tp_mult=tp_mult, sl_mult=sl_mult, horizon_max=horizon, mode=mode, bins=K)
-    features_df = df.drop(columns=["close"])  # full; dataset aligns indices
+    
+    # --- IMPORTANT ---
+    # The 'close' and 'atr' columns are needed for labeling but should NOT be used as model features.
+    # We will drop them from the dataframe that goes into the dataset.
+    features_to_drop = ['close', 'atr']
+    features_df = df.drop(columns=features_to_drop, errors='ignore')
+    
     ds = SequenceSurvivalDataset(features_df, targets, window=W, signature_cfg=modeling.get("signature_features", {}))
+    # ... (rest of the function) ...
     
     # Handle case where dataset is too small to train
     if len(ds) == 0:
@@ -164,6 +180,8 @@ def train_one_asset(df: pd.DataFrame, conf: Dict, device: str = "cpu") -> Dict:
     # Increased epochs for meaningful training on real data
     for epoch in range(conf.get("training", {}).get("epochs", 8)):
         model.train()
+        total_loss = 0
+        num_batches = 0
         for x_seq, meta, y in loader:
             x_seq = x_seq.to(device)
             out = model(x_seq)
@@ -173,6 +191,13 @@ def train_one_asset(df: pd.DataFrame, conf: Dict, device: str = "cpu") -> Dict:
             }
             loss = deephit_loss(out, tgt, use_movement_head=modeling.get("use_movement_head", True))
             opt.zero_grad(); loss.backward(); opt.step()
+            total_loss += loss.item()
+            num_batches += 1
+        
+        # --- NEW: Print epoch loss ---
+        avg_loss = total_loss / num_batches if num_batches > 0 else 0
+        print(f"  Epoch {epoch+1}/{conf.get('training', {}).get('epochs', 8)}, Average Loss: {avg_loss:.6f}")
+
     return {"model": model, "dataset": ds}
 
 

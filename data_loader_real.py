@@ -1,9 +1,12 @@
+# freedom44/data_loader_real.py
+
 import os
 import zipfile
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 import numpy as np
+from sklearn.preprocessing import StandardScaler # <-- Import StandardScaler
 
 # --- Feature Engineering Imports (from your project structure) ---
 from .features.microstructure import add_microstructure
@@ -85,7 +88,6 @@ def load_features_for_symbols(symbols: list, conf: dict) -> dict:
             continue
 
         # 3. Resample to 4-hour timeframe
-        # --- FIX: Changed '4H' to '4h' to avoid FutureWarning ---
         df_4h = df_1m.resample('4h').agg({
             'open': 'first',
             'high': 'max',
@@ -100,21 +102,25 @@ def load_features_for_symbols(symbols: list, conf: dict) -> dict:
         # 4. Feature Engineering
         df_4h['atr'] = _compute_atr(df_4h)
         
-        # Add features from your project's modules
         micro_feats = add_microstructure(df_4h, price='close', high='high', low='low', vol='volume')
         har_feats = add_har_rv(df_4h['close'].pct_change())
         regime_feats = add_regime(df_4h['close'])
         
-        # Combine all features
         df_featured = pd.concat([df_4h, micro_feats, har_feats, regime_feats], axis=1)
         
-        # Clean up any NaNs produced by rolling windows
         df_featured.replace([np.inf, -np.inf], np.nan, inplace=True)
         df_featured.dropna(inplace=True)
         
         if not df_featured.empty:
-            all_features[symbol] = df_featured
+            # --- NEW: Normalize the features ---
+            feature_cols = [col for col in df_featured.columns if col not in ['open', 'high', 'low', 'close', 'volume', 'atr']]
+            scaler = StandardScaler()
+            # Note: We keep original 'close' and 'atr' for labeling, but scale all other features
+            df_scaled = df_featured.copy()
+            if feature_cols: # Only scale if there are feature columns
+                 df_scaled[feature_cols] = scaler.fit_transform(df_featured[feature_cols])
+            
+            all_features[symbol] = df_scaled
 
     print(f"Successfully loaded and processed real data for {len(all_features)} assets.")
     return all_features
-
